@@ -3,6 +3,15 @@ import { useState, useEffect } from 'react'
 import { createClient } from '@/utils/supabase/client'
 import './calories.css'
 
+const FALLBACK_TODAY = {
+  calories: 1850,
+  protein: 120,
+  carbs: 210,
+  fat: 65,
+}
+
+const FALLBACK_WEEKLY_CALORIES = 11200
+
 export default function Calories() {
   const [todayCalories, setTodayCalories] = useState(0)
   const [todayProtein, setTodayProtein] = useState(0)
@@ -16,60 +25,90 @@ export default function Calories() {
     fetchWeeklyEntries()
   }, [])
 
+  const useFallbackToday = () => {
+    setTodayCalories(FALLBACK_TODAY.calories)
+    setTodayProtein(FALLBACK_TODAY.protein)
+    setTodayCarbs(FALLBACK_TODAY.carbs)
+    setTodayFat(FALLBACK_TODAY.fat)
+  }
+
+  const useFallbackWeekly = () => {
+    setWeeklyCalories(FALLBACK_WEEKLY_CALORIES)
+  }
+
   const fetchTodayEntries = async () => {
-    const { data: { user } } = await supabase.auth.getUser()
-    if (!user) return
+    try {
+      const { data: { user }, error: userError } = await supabase.auth.getUser()
+      if (userError || !user) {
+        console.error('Error fetching user for calories, using fallback:', userError)
+        useFallbackToday()
+        return
+      }
 
-    const today = new Date().toISOString().split('T')[0]
-    
-    const { data, error } = await supabase
-      .from('food_entries')
-      .select('*')
-      .eq('user_id', user.id)
-      .gte('logged_at', today)
-      .order('logged_at', { ascending: false })
+      const today = new Date().toISOString().split('T')[0]
+      
+      const { data, error } = await supabase
+        .from('food_entries')
+        .select('*')
+        .eq('user_id', user.id)
+        .gte('logged_at', today)
+        .order('logged_at', { ascending: false })
 
-    if (error) {
-      console.error('Error fetching entries:', error)
-      return
+      if (error) {
+        console.error('Error fetching entries, using fallback:', error)
+        useFallbackToday()
+        return
+      }
+
+      const totals = data?.reduce((acc, entry) => ({
+        calories: acc.calories + (entry.calories || 0),
+        protein: acc.protein + (entry.protein || 0),
+        carbs: acc.carbs + (entry.carbs || 0),
+        fat: acc.fat + (entry.fat || 0)
+      }), { calories: 0, protein: 0, carbs: 0, fat: 0 }) || { calories: 0, protein: 0, carbs: 0, fat: 0 }
+
+      setTodayCalories(totals.calories)
+      setTodayProtein(totals.protein)
+      setTodayCarbs(totals.carbs)
+      setTodayFat(totals.fat)
+    } catch (err) {
+      console.error('Supabase unavailable for today entries, using fallback:', err)
+      useFallbackToday()
     }
-
-    // Calculate today's totals
-    const totals = data?.reduce((acc, entry) => ({
-      calories: acc.calories + (entry.calories || 0),
-      protein: acc.protein + (entry.protein || 0),
-      carbs: acc.carbs + (entry.carbs || 0),
-      fat: acc.fat + (entry.fat || 0)
-    }), { calories: 0, protein: 0, carbs: 0, fat: 0 }) || { calories: 0, protein: 0, carbs: 0, fat: 0 }
-
-    setTodayCalories(totals.calories)
-    setTodayProtein(totals.protein)
-    setTodayCarbs(totals.carbs)
-    setTodayFat(totals.fat)
   }
 
   const fetchWeeklyEntries = async () => {
-    const { data: { user } } = await supabase.auth.getUser()
-    if (!user) return
+    try {
+      const { data: { user }, error: userError } = await supabase.auth.getUser()
+      if (userError || !user) {
+        console.error('Error fetching user for weekly calories, using fallback:', userError)
+        useFallbackWeekly()
+        return
+      }
 
-    const today = new Date()
-    const startOfWeek = new Date(today)
-    startOfWeek.setDate(today.getDate() - today.getDay())
-    startOfWeek.setHours(0, 0, 0, 0)
-    
-    const { data, error } = await supabase
-      .from('food_entries')
-      .select('calories')
-      .eq('user_id', user.id)
-      .gte('logged_at', startOfWeek.toISOString())
+      const today = new Date()
+      const startOfWeek = new Date(today)
+      startOfWeek.setDate(today.getDate() - today.getDay())
+      startOfWeek.setHours(0, 0, 0, 0)
+      
+      const { data, error } = await supabase
+        .from('food_entries')
+        .select('calories')
+        .eq('user_id', user.id)
+        .gte('logged_at', startOfWeek.toISOString())
 
-    if (error) {
-      console.error('Error fetching weekly entries:', error)
-      return
+      if (error) {
+        console.error('Error fetching weekly entries, using fallback:', error)
+        useFallbackWeekly()
+        return
+      }
+
+      const weeklyTotal = data?.reduce((acc, entry) => acc + (entry.calories || 0), 0) || 0
+      setWeeklyCalories(weeklyTotal)
+    } catch (err) {
+      console.error('Supabase unavailable for weekly entries, using fallback:', err)
+      useFallbackWeekly()
     }
-
-    const weeklyTotal = data?.reduce((acc, entry) => acc + (entry.calories || 0), 0) || 0
-    setWeeklyCalories(weeklyTotal)
   }
 
   // Calculate progress percentages

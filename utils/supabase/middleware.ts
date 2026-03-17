@@ -2,6 +2,12 @@ import { createServerClient } from '@supabase/ssr'
 import { NextResponse, type NextRequest } from 'next/server'
 
 export async function updateSession(request: NextRequest) {
+  // "Demo mode" cookie lets the app load even if Supabase is down/idle.
+  // This is useful for showing fallback/static UI without requiring auth.
+  if (request.cookies.get('ft_demo')?.value === '1') {
+    return NextResponse.next({ request })
+  }
+
   let supabaseResponse = NextResponse.next({
     request,
   })
@@ -33,9 +39,18 @@ export async function updateSession(request: NextRequest) {
 
   // IMPORTANT: DO NOT REMOVE auth.getUser()
 
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
+  let user: any | null = null
+  try {
+    const {
+      data: { user: supabaseUser },
+    } = await supabase.auth.getUser()
+    user = supabaseUser ?? null
+  } catch (err) {
+    // If Supabase is unreachable (e.g. project idled), fail open so the UI
+    // can still render fallback/static content.
+    console.error('Supabase auth.getUser failed in middleware:', err)
+    return supabaseResponse
+  }
 
   if (
     !user &&
@@ -43,7 +58,7 @@ export async function updateSession(request: NextRequest) {
     !request.nextUrl.pathname.startsWith('/auth') &&
     !request.nextUrl.pathname.startsWith('/error')
   ) {
-    // no user, potentially respond by redirecting the user to the login page
+    // no user, respond by redirecting the user to the login page
     const url = request.nextUrl.clone()
     url.pathname = '/login'
     return NextResponse.redirect(url)

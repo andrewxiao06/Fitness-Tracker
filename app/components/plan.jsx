@@ -2,6 +2,35 @@ import "./plan.css";
 import { useState, useEffect } from 'react';
 import { createClient } from '@/utils/supabase/client';
 
+const FALLBACK_PLAN = {
+  id: 'fallback',
+  name: 'Sample Push Day',
+};
+
+const FALLBACK_EXERCISES = [
+  {
+    id: '1',
+    exercise_name: 'Bench Press',
+    sets_x_reps: '3 x 8',
+    weight: 135,
+    muscle_group: 'Chest',
+  },
+  {
+    id: '2',
+    exercise_name: 'Lat Pulldown',
+    sets_x_reps: '3 x 10',
+    weight: 110,
+    muscle_group: 'Back',
+  },
+  {
+    id: '3',
+    exercise_name: 'Squat',
+    sets_x_reps: '3 x 5',
+    weight: 185,
+    muscle_group: 'Legs',
+  },
+];
+
 export default function Plan() {
   const [selectedPlan, setSelectedPlan] = useState(null);
   const [todayExercises, setTodayExercises] = useState([]);
@@ -25,69 +54,100 @@ export default function Plan() {
     }
   }, [selectedPlan]);
 
+  const useFallbackData = () => {
+    setSelectedPlan(FALLBACK_PLAN);
+    setTodayExercises(FALLBACK_EXERCISES);
+    setLoading(false);
+  };
+
   const fetchSelectedPlan = async () => {
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) {
-      setLoading(false);
-      return;
-    }
-
-    // Get the saved selected plan ID from localStorage
-    const savedPlanId = localStorage.getItem('selectedWorkoutPlanId');
-    
-    if (savedPlanId) {
-      const { data, error } = await supabase
-        .from('weekly_plans')
-        .select('*')
-        .eq('id', savedPlanId)
-        .eq('user_id', user.id)
-        .single();
-
-      if (error) {
-        console.error('Error fetching selected plan:', error);
-        // Fallback to first available plan
-        fetchFirstPlan(user.id);
-      } else {
-        setSelectedPlan(data);
+    try {
+      const { data: { user }, error: userError } = await supabase.auth.getUser();
+      if (userError || !user) {
+        console.error('Error fetching user, using fallback plan:', userError);
+        useFallbackData();
+        return;
       }
-    } else {
-      // No saved plan, get the first available plan
-      fetchFirstPlan(user.id);
+
+      const savedPlanId = typeof window !== 'undefined'
+        ? localStorage.getItem('selectedWorkoutPlanId')
+        : null;
+      
+      if (savedPlanId) {
+        const { data, error } = await supabase
+          .from('weekly_plans')
+          .select('*')
+          .eq('id', savedPlanId)
+          .eq('user_id', user.id)
+          .single();
+
+        if (error) {
+          console.error('Error fetching selected plan, falling back:', error);
+          await fetchFirstPlan(user.id);
+        } else {
+          setSelectedPlan(data);
+          setLoading(false);
+        }
+      } else {
+        await fetchFirstPlan(user.id);
+      }
+    } catch (err) {
+      console.error('Supabase unavailable, using fallback plan:', err);
+      useFallbackData();
     }
   };
 
   const fetchFirstPlan = async (userId) => {
-    const { data, error } = await supabase
-      .from('weekly_plans')
-      .select('*')
-      .eq('user_id', userId)
-      .order('created_at', { ascending: false })
-      .limit(1);
+    try {
+      const { data, error } = await supabase
+        .from('weekly_plans')
+        .select('*')
+        .eq('user_id', userId)
+        .order('created_at', { ascending: false })
+        .limit(1);
 
-    if (error) {
-      console.error('Error fetching first plan:', error);
-    } else if (data && data.length > 0) {
-      setSelectedPlan(data[0]);
+      if (error) {
+        console.error('Error fetching first plan, using fallback:', error);
+        useFallbackData();
+        return;
+      }
+
+      if (data && data.length > 0) {
+        setSelectedPlan(data[0]);
+      } else {
+        useFallbackData();
+        return;
+      }
+      setLoading(false);
+    } catch (err) {
+      console.error('Supabase unavailable when fetching first plan:', err);
+      useFallbackData();
     }
-    setLoading(false);
   };
 
   const fetchTodayExercises = async () => {
     if (!selectedPlan) return;
 
-    const { data, error } = await supabase
-      .from('daily_workout_exercises')
-      .select('*')
-      .eq('weekly_plan_id', selectedPlan.id)
-      .eq('day_of_week', todayKey)
-      .order('order_index', { ascending: true });
+    try {
+      const { data, error } = await supabase
+        .from('daily_workout_exercises')
+        .select('*')
+        .eq('weekly_plan_id', selectedPlan.id)
+        .eq('day_of_week', todayKey)
+        .order('order_index', { ascending: true });
 
-    if (error) {
-      console.error('Error fetching today exercises:', error);
-    } else {
-      setTodayExercises(data || []);
+      if (error) {
+        console.error('Error fetching today exercises, using fallback:', error);
+        setTodayExercises(FALLBACK_EXERCISES);
+      } else {
+        setTodayExercises(data || FALLBACK_EXERCISES);
+      }
+      setLoading(false);
+    } catch (err) {
+      console.error('Supabase unavailable when fetching exercises:', err);
+      setTodayExercises(FALLBACK_EXERCISES);
+      setLoading(false);
     }
-    setLoading(false);
   };
 
   const getWorkoutType = (muscleGroup) => {
